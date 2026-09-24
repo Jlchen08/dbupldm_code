@@ -25,9 +25,8 @@ Every model below is implemented independently and can be run on its own.
 
 | File | Model |
 |------|-------|
-| `CS_Unified_pin_ldm.m` | DBUPLDM (dual-balanced unified pinball loss distribution machine) |
 | `Unified_pin_ldm.m` | Unified pinball loss distribution machine (UP-LDM) |
-| `Unified_pin_csldm.m` | Cost-sensitive unified pinball loss distribution machine (CS-LDM) |
+| `Unified_pin_csldm.m` | Cost-sensitive unified pinball loss distribution machine (CS-LDM, and the dual-balanced variant DBUPLDM when driven by the dual balance factor) |
 | `Unified_pin_svm.m` | Unified pinball loss SVM (UP-SVM) |
 | `Unified_pin_cssvm.m` | Cost-sensitive unified pinball loss SVM (CS-SVM) |
 | `pin_svm.m` | Pinball loss SVM (Pin-SVM) |
@@ -37,11 +36,11 @@ Supporting routines:
 | File | Role |
 |------|------|
 | `Balance_factor.m` | Dual balance factor computation |
-| `Fuzzy_MemberShip.m`, `Fuzzy_MemberShip_FCM.m`, `Fuzzy_MemberShip_FCM_only.m` | Fuzzy membership / class-sensitive weights |
 | `Function_Kernel.m`, `svkernel.m` | Kernel functions (linear, RBF) |
 | `svdatanorm.m` | Feature normalization |
 | `myAUC.m` | AUC computation |
-| `tune_tau.m`, `tune_tau_std.m`, `tune_para_svm.m` | Hyperparameter tuning |
+| `tune_tau.m`, `tune_para_svm.m` | Hyperparameter tuning |
+| `createfigure.m` | Figure helper used by the tuning routine |
 | `main.m` | Example driver showing how the models are called |
 
 ### Python implementations (`python/`)

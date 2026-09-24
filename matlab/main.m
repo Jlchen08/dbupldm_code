@@ -74,8 +74,8 @@ for index=2:6
     end    
 
     %% Parameter setting
-%      Ctrain=awgn(Ctrain,0.05); % 高斯噪声
-%      Ctest=awgn(Ctest,0.05); % 高斯噪声
+%      Ctrain=awgn(Ctrain,0.05); % ???????
+%      Ctest=awgn(Ctest,0.05); % ???????
     Ctrain= svdatanorm(Ctrain,'svpline');
     Ctest= svdatanorm(Ctest,'scpline');
     clear C;
@@ -88,9 +88,7 @@ for index=2:6
     lamb2 = [2^-7,2^-6,2^-5,2^-4,2^-3,2^-2,2^-1,2^0,2^1];
     p1val=[2^-6];
     c1val=[2^-6,2^-5,2^-4,2^-3,2^-2,2^-1,2^0,2^1,2^2,2^3];
-%     theta = Balance_factor(Ctrain, dtrain, kernel, 0.5,p1);
-%    theta = Fuzzy_MemberShip(Ctrain, dtrain, kernel, 0.5,p1);
-        theta = Fuzzy_MemberShip_FCM(Ctrain, dtrain);
+        theta = Balance_factor(Ctrain, dtrain, kernel, 0.5, p1);
 %         p1val=2;
 %         c1val=2^-2;
 %     % Prameter Tunning
@@ -189,4 +187,4 @@ for i=1:m
     j=j+6;
 end
 
-xlswrite('FCM_only.xlsx', final);
+xlswrite('DBUPLDM_results.xlsx', final);
