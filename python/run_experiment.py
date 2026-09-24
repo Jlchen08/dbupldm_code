@@ -12,6 +12,7 @@ import torch
 import logging
 from datetime import datetime
 from typing import Dict, List
+import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -362,30 +363,28 @@ def main():
     主函数：运行完整实验流程
     """
     # 实验配置
-    dataset_path = r"e:\OneDrive\文档\大学\团队资料\论文修改\DBUPLDM\workspace\datasets"
-    
+    parser = argparse.ArgumentParser(description="Run the MLP+Focal and SVM experiments.")
+    parser.add_argument("--dataset-dir", default=os.path.join(os.path.dirname(__file__), "..", "datasets"))
+    parser.add_argument("--results-dir", default="results")
+    args = parser.parse_args()
+    dataset_path = args.dataset_dir
+
     # 检查数据集路径
     if not os.path.exists(dataset_path):
         logger.error(f"数据集路径不存在: {dataset_path}")
         return
-    
+
     # 创建实验运行器
-    runner = ExperimentRunner(dataset_path)
-    
+    runner = ExperimentRunner(dataset_path, results_dir=args.results_dir)
+
     # 实验配置
     experiment_config = {
-        # 'hidden_dims': [128, 64],
-        'hidden_dims': [8, 4],
-        # 'dropout_rate': 0.3,
+        'hidden_dims': [128, 64],
         'dropout_rate': 0.3,
-        # 'learning_rate': 0.001,
         'learning_rate': 0.001,
-        # 'batch_size': 32,
         'batch_size': 32,
         'epochs': 100,
-        # 'gamma': 2.0,
         'gamma': 2.0,
-        # 'patience': 15,
         'patience': 15,
         'random_state': 42
     }

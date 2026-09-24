@@ -31,11 +31,16 @@ def run_dataset(loader, dataset_name, config, folds, device):
     for fold, (train_idx, test_idx) in enumerate(splitter.split(raw_x, raw_y), start=1):
         assignments.append({"fold": fold, "train_indices": train_idx.tolist(), "test_indices": test_idx.tolist()})
         # Fit the scaler on each training fold only to prevent test-fold leakage.
+        # The test fold is transformed with the training-fold scaler and used
+        # only for final reporting, never for model selection.
         train_x = loader.scaler.fit_transform(raw_x[train_idx]).astype(np.float32)
         test_x = loader.scaler.transform(raw_x[test_idx]).astype(np.float32)
         train_y, test_y = raw_y[train_idx], raw_y[test_idx]
         for method in METHODS:
-            metrics, metadata = train_classifier(train_x, train_y, test_x, test_y, method, config, device)
+            metrics, metadata = train_classifier(
+                train_x, train_y, test_x, test_y, method, config, device,
+                validation_fraction=config.validation_fraction, validation_seed=config.seed,
+            )
             rows.append({
                 "dataset": dataset_name,
                 "fold": fold,

@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.neighbors import NearestNeighbors
 
 
@@ -33,6 +34,7 @@ class BaselineConfig:
     deferred_reweight_epoch: int = 160
     smote_penalty: float = 0.1
     smote_k_neighbors: int = 5
+    validation_fraction: float = 0.2
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -151,7 +153,8 @@ def _batch_metrics(y_true, logits):
     return result
 
 
-def train_classifier(X_train, y_train, X_valid, y_valid, method: str, config: BaselineConfig, device="cpu"):
+def train_classifier(X_train, y_train, X_valid, y_valid, method: str, config: BaselineConfig, device="cpu",
+                       validation_fraction: float = 0.2, validation_seed: int = 0):
     seed_everything(config.seed)
     X_train = np.asarray(X_train, dtype=np.float32)
     y_train = np.asarray(y_train, dtype=np.int64)
@@ -159,10 +162,20 @@ def train_classifier(X_train, y_train, X_valid, y_valid, method: str, config: Ba
     y_valid = np.asarray(y_valid, dtype=np.int64)
     num_classes = int(max(y_train.max(), y_valid.max()) + 1)
 
+    # Split a held-out selection fold from the training fold. Early stopping,
+    # the learning-rate schedule, and checkpoint choice use this selection fold
+    # only; the reporting fold (X_valid / y_valid) is never consulted until the
+    # final evaluation, so the reported Accuracy / AUC / F1 are unbiased test
+    # estimates under the same stratified 5-fold protocol.
+    splitter = StratifiedShuffleSplit(n_splits=1, test_size=validation_fraction, random_state=validation_seed)
+    fit_idx, select_idx = next(splitter.split(X_train, y_train))
+    X_fit, y_fit = X_train[fit_idx], y_train[fit_idx]
+    X_select, y_select = X_train[select_idx], y_train[select_idx]
+
     if method == "deepsmote":
-        pretraining = EncoderDecoder(X_train.shape[1], config.latent_dim).to(device)
+        pretraining = EncoderDecoder(X_fit.shape[1], config.latent_dim).to(device)
         optimizer = torch.optim.Adam(pretraining.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-        x_tensor = torch.as_tensor(X_train, device=device)
+        x_tensor = torch.as_tensor(X_fit, device=device)
         for _ in range(min(config.epochs, 100)):
             optimizer.zero_grad()
             latent, reconstruction = pretraining(x_tensor)
@@ -171,26 +184,32 @@ def train_classifier(X_train, y_train, X_valid, y_valid, method: str, config: Ba
             optimizer.step()
         with torch.no_grad():
             latent = pretraining.encoder(x_tensor).cpu().numpy()
-        latent, y_train = _smote_latent(latent, y_train, config.seed, config.smote_k_neighbors)
+        latent, y_fit = _smote_latent(latent, y_fit, config.seed, config.smote_k_neighbors)
         with torch.no_grad():
-            X_train = pretraining.decoder(torch.as_tensor(latent, dtype=torch.float32, device=device)).cpu().numpy()
+            X_fit = pretraining.decoder(torch.as_tensor(latent, dtype=torch.float32, device=device)).cpu().numpy()
         method = "mlp"
 
-    model = TabularMLP(X_train.shape[1], num_classes, config.hidden_dims, config.dropout).to(device)
-    counts = _class_counts(y_train, num_classes).to(device)
+    model = TabularMLP(X_fit.shape[1], num_classes, config.hidden_dims, config.dropout).to(device)
+    counts = _class_counts(y_fit, num_classes).to(device)
     if method == "ldam":
         criterion = LDAMLoss(counts, config.ldam_max_margin, config.ldam_scale).to(device)
     elif method == "balanced_softmax":
         criterion = BalancedSoftmaxLoss(counts).to(device)
-    elif method in {"mlp", "mlp_focal"}:
+    elif method == "mlp_focal":
         criterion = FocalLoss(counts, config.gamma).to(device)
+    elif method == "mlp":
+        # DeepSMOTE trains a standard classifier on the balanced augmented set,
+        # so its downstream loss is plain cross-entropy (not focal loss).
+        criterion = nn.CrossEntropyLoss().to(device)
     else:
         raise ValueError(f"Unknown baseline: {method}")
 
-    train_x = torch.as_tensor(X_train, device=device)
-    train_y = torch.as_tensor(y_train, device=device)
-    valid_x = torch.as_tensor(X_valid, device=device)
-    valid_y = torch.as_tensor(y_valid, device=device)
+    train_x = torch.as_tensor(X_fit, device=device)
+    train_y = torch.as_tensor(y_fit, device=device)
+    select_x = torch.as_tensor(X_select, device=device)
+    select_y = torch.as_tensor(y_select, device=device)
+    report_x = torch.as_tensor(X_valid, device=device)
+    report_y = torch.as_tensor(y_valid, device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=config.scheduler_patience)
     best_state, best_loss, stale = None, float("inf"), 0
@@ -214,10 +233,10 @@ def train_classifier(X_train, y_train, X_valid, y_valid, method: str, config: Ba
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
-        valid_loss = criterion(model(valid_x), valid_y).item()
-        scheduler.step(valid_loss)
-        if valid_loss < best_loss - 1e-6:
-            best_loss, stale, best_state = valid_loss, 0, copy.deepcopy(model.state_dict())
+        select_loss = criterion(model(select_x), select_y).item()
+        scheduler.step(select_loss)
+        if select_loss < best_loss - 1e-6:
+            best_loss, stale, best_state = select_loss, 0, copy.deepcopy(model.state_dict())
         else:
             stale += 1
             if stale >= config.patience:
@@ -225,8 +244,9 @@ def train_classifier(X_train, y_train, X_valid, y_valid, method: str, config: Ba
     model.load_state_dict(best_state)
     model.eval()
     with torch.no_grad():
-        logits = model(valid_x)
-    return _batch_metrics(y_valid, logits), {"epochs_trained": epoch + 1, "config": config.to_dict()}
+        logits = model(report_x)
+    metrics = _batch_metrics(y_valid, logits)
+    return metrics, {"epochs_trained": epoch + 1, "selection_split": float(len(select_idx)) / float(max(len(y_train), 1)), "config": config.to_dict()}
 
 
 class FocalLoss(nn.Module):
